@@ -13,7 +13,7 @@ from common.tmp_dir import TmpDir
 from playwright.sync_api import sync_playwright
 from plugins import *
 
-from .prompts import get_prompt
+from .prompts import chinese_teacher, chinese_teacher_claude, chinese_teacher_claude_v2,card_designer
 
 
 def read_file(path):
@@ -24,9 +24,9 @@ def read_file(path):
 @plugins.register(
     name="chinesepua",
     desc="A plugin that generates satirical explanation cards for Chinese phrases",
-    version="0.5",
+    version="0.3",
     author="BenedictKing",
-    desire_priority=90,
+    desire_priority=115,
 )
 class ChinesePua(Plugin):
     def __init__(self):
@@ -40,20 +40,15 @@ class ChinesePua(Plugin):
             if os.path.exists(json_path):
                 # 读取config.json配置文件
                 gconf = json.loads(read_file(json_path))
-                logger.debug(f"[chinesepua] 从config.json读取配置: {gconf}")
             elif os.path.exists(tm_path):
                 # 读取config.json.template配置文件
                 gconf = json.loads(read_file(tm_path))
-                logger.debug(f"[chinesepua] 读取config.json.template读取配置: {gconf}")
+
         try:
             self.handlers[Event.ON_HANDLE_CONTEXT] = self.on_handle_context
             self.api_key = gconf.get("api_key")
             self.api_base = gconf.get("api_base")
             self.api_model = gconf.get("api_model")
-            self.claude_key = gconf.get("claude_key")
-            self.claude_base = gconf.get("claude_base")
-            self.claude_model = gconf.get("claude_model", "claude-3-5-sonnet-20240620")
-            self.max_tokens = gconf.get("max_tokens", 0)
             self.with_text = gconf.get("with_text", False)
             logger.debug("[chinesepua] inited")
         except Exception as e:
@@ -66,143 +61,43 @@ class ChinesePua(Plugin):
         context = e_context["context"]
         if context.type not in [ContextType.TEXT]:
             return
-
-        keyword = None
-        prompt = None
-
+        
+        keyword=None
+        
         if context.content.startswith(("设计", "名片")):
             match = re.search(r"(设计|名片)(.+)", context.content)
             if match:
-                keyword = match.group(2).strip()
-                logger.debug(f"[chinesepua] 名片: {keyword}")
-                prompt = get_prompt("card_designer")
-
-        if context.content.startswith(("解字", "字典", "字源")):
-            match = re.search(r"(解字|字典|字源)(.+)", context.content)
+                keyword = match.group(2).strip()  # 获取名片内容
+                prompt=card_designer
+                
+        if context.content.startswith(("PUA", "pua", "吐槽", "啥意思", "解释", "啥是", "啥概念", "啥叫", "什么是", "啥玩意", "怎么理解", "解释下", "解释一下", "啥意义", "啥来的", "啥东西", "咋理解", "怎么说", "啥情况", "咋说", "怎么看","咋理解")):
+            match = re.search(r"(PUA|pua|吐槽|槽点|解释|新解|啥意思|啥是|啥概念|啥叫|什么是|啥玩意|怎么理解|解释下|解释一下|啥意义|啥来的|啥东西|咋理解|怎么说|啥情况|咋说|怎么看|咋理解)(.+)", context.content)
             if match:
-                keyword = match.group(2).strip()
-                logger.debug(f"[chinesepua] 解字: {keyword}")
-                if len(keyword) > 10:
-                    _set_reply_text(
-                        "输入太长了，简短一些吧", e_context, level=ReplyType.TEXT
-                    )
-                    return
-                prompt = get_prompt("word_explainer")
-
-        if context.content.startswith(("PUA", "pua", "吐槽", "槽点", "解释", "新解")):
-            match = re.search(r"(PUA|pua|吐槽|槽点|解释|新解)(.+)", context.content)
-            if match:
-                keyword = match.group(2).strip()
+                keyword = match.group(2).strip()  # 获取搜索关键词
                 logger.debug(f"[chinesepua] 吐槽: {keyword}")
-                if "claude" in keyword or "Claude" in keyword:
-                    keyword = keyword.replace("claude", "").replace("Claude", "")
-                    prompt = get_prompt("chinese_teacher_claude")
-                else:
-                    prompt = get_prompt("chinese_teacher")
-                if len(keyword) > 10:
+                if len(keyword) > 8:
                     _set_reply_text(
                         "输入太长了，简短一些吧", e_context, level=ReplyType.TEXT
                     )
                     return
-
-        if context.content.startswith(("翻译")):
-            match = re.search(r"(翻译)(.+)", context.content)
-            if match:
-                keyword = match.group(2).strip()
-                logger.debug(f"[chinesepua] 翻译: {keyword}")
-                prompt = get_prompt("translate_expert")
-
-        if context.content.startswith(("论证", "分析")):
-            match = re.search(r"(论证|分析)(.+)", context.content)
-            if match:
-                keyword = match.group(2).strip()
-                logger.debug(f"[chinesepua] 论证: {keyword}")
-                prompt = get_prompt("argument_analyser")
-
-        if context.content.startswith(("撕考者", "思考者", "思考", "撕考")):
-            match = re.search(r"(撕考者|思考者|思考|撕考)(.+)", context.content)
-            if match:
-                keyword = match.group(2).strip()
-                logger.debug(f"[chinesepua] 思考: {keyword}")
-                prompt = get_prompt("thinker")
-
-        if context.content.startswith(("深度思考者", "深度思考", "沉思", "琢磨")):
-            match = re.search(r"(深度思考者|深度思考|沉思|琢磨)(.+)", context.content)
-            if match:
-                keyword = match.group(2).strip()
-                logger.debug(f"[chinesepua] 深度思考: {keyword}")
-                prompt = get_prompt("deep_thinker")
-
-        if context.content.startswith(("概念", "概念解释")):
-            match = re.search(r"(概念|概念解释)(.+)", context.content)
-            if match:
-                keyword = match.group(2).strip()
-                logger.debug(f"[chinesepua] 概念: {keyword}")
-                prompt = get_prompt("concept_explainer")
-
-        if context.content.startswith(("哲学家", "哲学")):
-            match = re.search(r"(哲学家|哲学)(.+)", context.content)
-            if match:
-                keyword = match.group(2).strip()
-                logger.debug(f"[chinesepua] 哲学家: {keyword}")
-                prompt = get_prompt("philosopher")
-
-        if context.content.startswith(("互联网", "web2")):
-            match = re.search(r"(互联网|web2)(.+)", context.content)
-            if match:
-                keyword = match.group(2).strip()
-                logger.debug(f"[chinesepua] 互联网: {keyword}")
-                prompt = get_prompt("web2_expert")
-
-        if context.content.startswith(("知识", "知识卡")):
-            match = re.search(r"(知识|知识卡)(.+)", context.content)
-            if match:
-                keyword = match.group(2).strip()
-                logger.debug(f"[chinesepua] 知识: {keyword}")
-                prompt = get_prompt("knowledge_card")
-
-        if context.content.startswith(("单词", "单词卡")):
-            match = re.search(r"(单词|单词卡)(.+)", context.content)
-            if match:
-                keyword = match.group(2).strip()
-                logger.debug(f"[chinesepua] 单词: {keyword}")
-                prompt = get_prompt("word_card")
-
-        if (
-            prompt
-            and prompt.force_claude
-            and not (self.claude_base and self.claude_key)
-        ):
-            _set_reply_text(
-                "这个功能需要Claude API，请先配置好再使用",
-                e_context,
-                level=ReplyType.TEXT,
-            )
-            return
-
+                prompt=chinese_teacher
+        
         if keyword:
             try:
-                payload = {
-                    "model": (
-                        self.claude_model if prompt.force_claude else self.api_model
-                    ),
-                    "messages": [
-                        {"role": "system", "content": prompt.content},
-                        {"role": "user", "content": keyword},
-                    ],
-                }
-                if self.max_tokens > 0:
-                    payload["max_tokens"] = self.max_tokens
-
                 response = requests.post(
-                    "%s/chat/completions"
-                    % (self.claude_base if prompt.force_claude else self.api_base),
+                    f"{self.api_base}/chat/completions",
                     headers={
                         "Authorization": f"Bearer {self.api_key}",
                         "Content-Type": "application/json",
                         "Accept": "application/json",
                     },
-                    json=payload,
+                    json={
+                        "model": self.api_model,
+                        "messages": [
+                            {"role": "system", "content": prompt},\
+                            {"role": "user", "content": keyword},
+                        ],
+                    },
                 )
                 response.raise_for_status()
                 text = response.json()["choices"][0]["message"]["content"]
@@ -222,7 +117,7 @@ class ChinesePua(Plugin):
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link href="https://cdn.jsdelivr.net/npm/noto-sans-sc@37.0.0/all.min.css" rel="stylesheet">
+    <link href="https://fonts.loli.net/css2?family=Noto+Serif+SC:wght@400;700&family=Noto+Sans+SC:wght@300;400&display=swap" rel="stylesheet">
     <title>汉语新解</title>
     <style>
         body, html {
@@ -235,6 +130,8 @@ class ChinesePua(Plugin):
             font-family: 'Noto Sans SC', sans-serif;
         }
         .card {
+            width: 400px;
+            height: 600px;
             box-shadow: 0 20px 40px rgba(0,0,0,0.1);
             overflow: hidden;
             position: relative;
@@ -244,7 +141,7 @@ class ChinesePua(Plugin):
     </style>
 </head>
 """
-                            + f"""
+                                + f"""
 <body>
     <div class="card">
         {svg_content}
@@ -252,7 +149,7 @@ class ChinesePua(Plugin):
 </body>
 </html>
 """
-                        )
+                            )
                     else:
                         html_content = ""
 
@@ -278,10 +175,6 @@ class ChinesePua(Plugin):
 
                     if self.with_text:
                         reply_text += "\n\n卡片正在生成中..."
-                elif not self.with_text:
-                    reply_text = "生成失败，请检查模型输出结果"
-                    _set_reply_text(reply_text, e_context, level=ReplyType.TEXT)
-                    return
 
                 _set_reply_text(reply_text, e_context, level=ReplyType.TEXT)
 
@@ -327,7 +220,7 @@ class ChinesePua(Plugin):
             logger.error(f"HTML渲染为图片失败: {e}")
             # 如果转换失败，可以在这里发送一条错误消息
             _send_reply_text(
-                "生成卡片失败，请稍后再试。。。", e_context, level=ReplyType.TEXT
+                "生成卡片失败，请稍后再试。。。", e_context, level=ReplyType.ERROR
             )
 
     # 帮助文档
